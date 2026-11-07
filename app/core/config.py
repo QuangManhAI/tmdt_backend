@@ -54,11 +54,16 @@ class Settings(BaseSettings):
 
     # MoMo Payment Gateway (Mục 7)
     MOMO_MOCK: bool = True
+    # Khi MOMO_MOCK=False mà không kết nối được Proxy/MoMo (timeout/530/403), tự động chuyển sang cổng giả lập
+    MOMO_FALLBACK_MOCK: bool = True
     # Không đặt giá trị mặc định: đọc từ biến môi trường. Bắt buộc khi MOMO_MOCK=False.
     MOMO_PARTNER_CODE: str = ""
     MOMO_ACCESS_KEY: str = ""
     MOMO_SECRET_KEY: str = ""
     MOMO_ENDPOINT: str = "https://test-payment.momo.vn/v2/gateway/api/create"
+    # URL Reverse Proxy (ví dụ: https://api-vo.minio-quangmanh.io.vn/api/v1/payments/momo/proxy) để Railway gọi qua IP Việt Nam
+    MOMO_PROXY_URL: str = ""
+    MOMO_PROXY_TIMEOUT: float = 4.0
     MOMO_REDIRECT_URL: str = "http://localhost:3000/orders/payment-result"
     MOMO_IPN_URL: str = "http://localhost:8000/api/v1/payments/momo/ipn"
 
