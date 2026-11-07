@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
@@ -287,3 +288,58 @@ async def test_startup_refuses_real_momo_without_keys(monkeypatch):
     with pytest.raises(RuntimeError, match="MOMO_SECRET_KEY"):
         async with lifespan(app):
             pass
+
+
+async def _insert_momo_order(db, code):
+    await db["orders"].insert_one({
+        "order_code": code,
+        "user_id": "usr-cust-01",
+        "total_amount": 240000,
+        "status": "pending_payment",
+        "payment_method": "MOMO",
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+@pytest.mark.asyncio
+async def test_real_momo_returns_pay_url_and_reuses_it_on_retry(client: AsyncClient, customer_headers, mock_mongo_db, monkeypatch):
+    """MOMO_MOCK=False: trả đúng payUrl của MoMo; thanh toán lại không gọi MoMo lần hai vì orderId trùng sẽ bị từ chối."""
+    calls = []
+
+    async def fake_create(order_id, amount, order_info):
+        calls.append(order_id)
+        return {
+            "resultCode": 0,
+            "message": "Thành công.",
+            "requestId": "req-1",
+            "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?t=abc",
+            "qrCodeUrl": "momo://app?action=payWithApp",
+        }
+
+    monkeypatch.setattr(settings, "MOMO_MOCK", False)
+    monkeypatch.setattr(sys.modules["app.modules.payments.router"], "create_momo_payment", fake_create)
+    await _insert_momo_order(mock_mongo_db, "DT-20261107-REAL1")
+
+    for _ in range(2):
+        res = await client.post("/api/v1/payments/momo/create", headers=customer_headers, json={"order_code": "DT-20261107-REAL1"})
+        assert res.status_code == 200
+        assert res.json()["data"]["pay_url"] == "https://test-payment.momo.vn/v2/gateway/pay?t=abc"
+    assert calls == ["DT-20261107-REAL1"]
+
+
+@pytest.mark.asyncio
+async def test_real_momo_failure_returns_error_not_qr_deeplink(client: AsyncClient, customer_headers, mock_mongo_db, monkeypatch):
+    """MoMo từ chối thì báo lỗi, không trả chuỗi rỗng hay link momo:// khiến trình duyệt không mở được."""
+
+    async def fake_create(order_id, amount, order_info):
+        return {"resultCode": 22, "message": "Số tiền không hợp lệ", "payUrl": None, "qrCodeUrl": "momo://app"}
+
+    monkeypatch.setattr(settings, "MOMO_MOCK", False)
+    monkeypatch.setattr(sys.modules["app.modules.payments.router"], "create_momo_payment", fake_create)
+    await _insert_momo_order(mock_mongo_db, "DT-20261107-REAL2")
+
+    res = await client.post("/api/v1/payments/momo/create", headers=customer_headers, json={"order_code": "DT-20261107-REAL2"})
+    assert res.status_code == 502
+    assert "mã 22" in res.json()["detail"]
+    order = await mock_mongo_db["orders"].find_one({"order_code": "DT-20261107-REAL2"})
+    assert "momo_pay_url" not in order

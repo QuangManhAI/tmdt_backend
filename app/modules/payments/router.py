@@ -45,6 +45,21 @@ async def create_payment(
     amount = int(order.get("total_amount", 0))
     order_info = f"Thanh toan don hang {order.get('order_code')}"
 
+    # MoMo từ chối orderId trùng (mã 41), nên thanh toán lại thì dùng lại link đã tạo cho đơn này
+    if not settings.MOMO_MOCK and order.get("momo_pay_url"):
+        return APIResponse(
+            success=True,
+            message="Dùng lại link thanh toán MoMo của đơn hàng",
+            data=PaymentCreateResponse(
+                order_code=order.get("order_code"),
+                amount=amount,
+                request_id=order.get("momo_request_id") or str(uuid.uuid4()),
+                pay_url=order["momo_pay_url"],
+                qr_code_url=order.get("momo_qr_code_url"),
+                message="Thành công",
+            ),
+        )
+
     # Gọi hàm tích hợp MoMo
     momo_resp = await create_momo_payment(
         order_id=order.get("order_code"),
@@ -52,7 +67,24 @@ async def create_payment(
         order_info=order_info,
     )
 
-    pay_url = momo_resp.get("payUrl") or momo_resp.get("qrCodeUrl") or ""
+    # Chỉ payUrl mới mở được trên trình duyệt; qrCodeUrl là chuỗi momo:// dùng để vẽ QR
+    pay_url = momo_resp.get("payUrl")
+    if momo_resp.get("resultCode") != 0 or not pay_url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"MoMo chưa tạo được link thanh toán (mã {momo_resp.get('resultCode')}): {momo_resp.get('message')}",
+        )
+
+    if not settings.MOMO_MOCK:
+        await orders_col.update_one(
+            {"order_code": order.get("order_code")},
+            {"$set": {
+                "momo_pay_url": pay_url,
+                "momo_qr_code_url": momo_resp.get("qrCodeUrl"),
+                "momo_request_id": momo_resp.get("requestId"),
+            }},
+        )
+
     return APIResponse(
         success=True,
         message="Tạo yêu cầu thanh toán MoMo thành công",
