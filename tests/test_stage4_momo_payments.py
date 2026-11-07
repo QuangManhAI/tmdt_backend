@@ -343,3 +343,22 @@ async def test_real_momo_failure_returns_error_not_qr_deeplink(client: AsyncClie
     assert "mã 22" in res.json()["detail"]
     order = await mock_mongo_db["orders"].find_one({"order_code": "DT-20261107-REAL2"})
     assert "momo_pay_url" not in order
+
+
+@pytest.mark.asyncio
+async def test_momo_non_json_response_reports_http_status(monkeypatch):
+    """MoMo trả HTML (ví dụ 403 của nginx) thì thông báo lỗi phải nêu mã HTTP để biết bên nào chặn."""
+    import httpx
+    from app.modules.payments.momo import create_momo_payment
+
+    real_client = httpx.AsyncClient
+    html = "<html><head><title>403 Forbidden</title></head></html>"
+    transport = httpx.MockTransport(lambda request: httpx.Response(403, text=html))
+    monkeypatch.setattr(settings, "MOMO_MOCK", False)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+
+    res = await create_momo_payment("DT-20261107-HTML1", 240000, "test")
+    assert res["resultCode"] == 99
+    assert res["payUrl"] is None
+    assert "HTTP 403" in res["message"]
+    assert "403 Forbidden" in res["message"]
