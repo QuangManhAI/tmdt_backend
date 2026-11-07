@@ -19,6 +19,13 @@ async def lifespan(app: FastAPI):
             "SECRET_KEY chưa được cấu hình an toàn. Đặt biến môi trường SECRET_KEY ngẫu nhiên >= 32 ký tự "
             "(ví dụ: python -c \"import secrets; print(secrets.token_urlsafe(48))\"), hoặc DEBUG=True khi chạy local."
         )
+    # Mục 7: gọi MoMo thật mà thiếu khóa thì không tạo được giao dịch và không xác minh được IPN
+    missing_momo_keys = settings.missing_momo_keys()
+    if not settings.MOMO_MOCK and missing_momo_keys:
+        raise RuntimeError(
+            f"MOMO_MOCK=False nhưng chưa cấu hình: {', '.join(missing_momo_keys)}. "
+            "Đặt các biến môi trường này, hoặc MOMO_MOCK=True để chạy chế độ giả lập."
+        )
     # Khởi tạo kết nối MongoDB và tạo các index
     await connect_to_mongo()
     await init_db()

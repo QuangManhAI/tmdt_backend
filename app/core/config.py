@@ -54,9 +54,10 @@ class Settings(BaseSettings):
 
     # MoMo Payment Gateway (Mục 7)
     MOMO_MOCK: bool = True
-    MOMO_PARTNER_CODE: str = "MOMOBKUN20180529"
-    MOMO_ACCESS_KEY: str = "klm05TvNBzhg7hSr"
-    MOMO_SECRET_KEY: str = "at67qH6mk8w5Y1nAyMoYKMWACiEi2Aca"
+    # Không đặt giá trị mặc định: đọc từ biến môi trường. Bắt buộc khi MOMO_MOCK=False.
+    MOMO_PARTNER_CODE: str = ""
+    MOMO_ACCESS_KEY: str = ""
+    MOMO_SECRET_KEY: str = ""
     MOMO_ENDPOINT: str = "https://test-payment.momo.vn/v2/gateway/api/create"
     MOMO_REDIRECT_URL: str = "http://localhost:3000/orders/payment-result"
     MOMO_IPN_URL: str = "http://localhost:8000/api/v1/payments/momo/ipn"
@@ -82,6 +83,11 @@ class Settings(BaseSettings):
             len(self.SECRET_KEY) < 32
             or self.SECRET_KEY.startswith(("dev-insecure", "super-secret-key-change"))
         )
+
+    def missing_momo_keys(self) -> List[str]:
+        """Tên các biến khóa MoMo còn trống. Thiếu MOMO_SECRET_KEY thì chữ ký IPN có thể bị giả mạo."""
+        keys = ("MOMO_PARTNER_CODE", "MOMO_ACCESS_KEY", "MOMO_SECRET_KEY")
+        return [name for name in keys if not getattr(self, name).strip()]
 
     model_config = SettingsConfigDict(
         env_file=".env",
