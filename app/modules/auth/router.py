@@ -1,3 +1,4 @@
+import re
 import logging
 import secrets
 import uuid
@@ -102,13 +103,16 @@ async def login(credentials: UserLogin, db: AsyncIOMotorDatabase = Depends(get_d
     users_col = db["users"]
     now = datetime.now(timezone.utc)
 
-    # Tìm user theo phone hoặc email
-    user = await users_col.find_one({
-        "$or": [
-            {"phone": credentials.phone},
-            {"email": credentials.phone},
-        ]
-    })
+    # Tìm user theo phone hoặc email (email so khớp không phân biệt hoa thường, bỏ khoảng trắng thừa)
+    identifier = credentials.phone.strip()
+    if "@" in identifier:
+        user = await users_col.find_one(
+            {"email": {"$regex": f"^{re.escape(identifier)}$", "$options": "i"}}
+        )
+    else:
+        identifier = re.sub(r"[\s.]", "", identifier)
+        user = await users_col.find_one({"phone": identifier})
+    credentials.phone = identifier
 
     # Hỗ trợ tìm linh hoạt giữa đầu số 0988 và 0909 cho tài khoản demo
     if not user and credentials.phone:
