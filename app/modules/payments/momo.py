@@ -1,11 +1,14 @@
 import hashlib
 import hmac
+import logging
 import time
 import uuid
 import httpx
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def generate_signature(raw_data: str, secret_key: str) -> str:
@@ -149,13 +152,25 @@ async def create_momo_payment(order_id: str, amount: int, order_info: str) -> Di
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.post(settings.MOMO_ENDPOINT, json=request_payload)
-            return resp.json()
         except Exception as e:
+            logger.warning("Không gọi được MoMo tại %s: %r", settings.MOMO_ENDPOINT, e)
             return {
                 "resultCode": 99,
-                "message": f"Không thể kết nối tới MoMo API: {str(e)}",
+                "message": f"Không thể kết nối tới MoMo API: {e!r}",
                 "payUrl": None,
             }
+
+    try:
+        return resp.json()
+    except ValueError:
+        # Tường lửa hoặc proxy thường trả HTML; ghi lại để biết chính xác bên nào chặn
+        body = " ".join(resp.text.split())[:200]
+        logger.warning("MoMo trả về nội dung không phải JSON: url=%s status=%s body=%s", settings.MOMO_ENDPOINT, resp.status_code, body)
+        return {
+            "resultCode": 99,
+            "message": f"MoMo trả về HTTP {resp.status_code}, không phải JSON: {body[:100]}",
+            "payUrl": None,
+        }
 
 
 def generate_mock_ipn_payload(
