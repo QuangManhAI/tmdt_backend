@@ -77,8 +77,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if settings.DEBUG and request.headers.get("X-Bypass-Rate-Limit") == "true":
             return await call_next(request)
 
+        # Sau Cloudflare Tunnel: CF-Connecting-IP do Cloudflare ghi đè nên client không giả mạo được,
+        # còn phần tử đầu của X-Forwarded-For thì client tự gửi được.
+        cf_ip = request.headers.get("CF-Connecting-IP")
         forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
+        if cf_ip:
+            client_ip = cf_ip.strip()
+        elif forwarded_for:
             client_ip = forwarded_for.split(",")[0].strip()
         else:
             client_ip = request.client.host if request.client else "127.0.0.1"

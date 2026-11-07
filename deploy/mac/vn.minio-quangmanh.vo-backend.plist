@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>vn.minio-quangmanh.vo-backend</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/quangmanh/Project/TMDT/tmdt_backend/deploy/mac/run-backend.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/quangmanh/Library/Logs/vo-backend.log</string>
+  <key>StandardErrorPath</key><string>/Users/quangmanh/Library/Logs/vo-backend.log</string>
+</dict>
+</plist>
