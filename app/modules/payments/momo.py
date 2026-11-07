@@ -87,8 +87,103 @@ def verify_ipn_signature(data: Dict[str, Any]) -> bool:
     return hmac.compare_digest(incoming_sig, expected_sig)
 
 
+def verify_create_signature(data: Dict[str, Any]) -> bool:
+    """Xác minh chữ ký số HMAC-SHA256 của yêu cầu tạo giao dịch khi gọi qua Reverse Proxy."""
+    incoming_sig = data.get("signature", "")
+    if not incoming_sig or not settings.MOMO_SECRET_KEY or not settings.MOMO_ACCESS_KEY:
+        return False
+
+    expected_sig = build_create_signature(
+        access_key=settings.MOMO_ACCESS_KEY,
+        amount=int(data.get("amount", 0)),
+        extra_data=str(data.get("extraData", "")),
+        ipn_url=str(data.get("ipnUrl", "")),
+        order_id=str(data.get("orderId", "")),
+        order_info=str(data.get("orderInfo", "")),
+        partner_code=str(data.get("partnerCode", settings.MOMO_PARTNER_CODE)),
+        redirect_url=str(data.get("redirectUrl", "")),
+        request_id=str(data.get("requestId", "")),
+        request_type=str(data.get("requestType", "captureWallet")),
+        secret_key=settings.MOMO_SECRET_KEY,
+    )
+    return hmac.compare_digest(incoming_sig, expected_sig)
+
+
+def build_mock_momo_payment(
+    order_id: str,
+    amount: int,
+    order_info: str,
+    request_id: Optional[str] = None,
+    reason: str = "MOMO_MOCK=True",
+) -> Dict[str, Any]:
+    """Tạo phản hồi cổng thanh toán MoMo giả lập trên frontend (dùng cho MOMO_MOCK hoặc khi Fallback)."""
+    req_id = request_id or str(uuid.uuid4())
+    query = urlencode({"orderId": order_id, "amount": amount, "requestId": req_id, "orderInfo": order_info})
+    mock_pay_url = f"{settings.FRONTEND_URL.rstrip('/')}/payments/momo?{query}"
+    mock_qr_url = f"https://api.qrserver.com/v1/create-qr-code/?{urlencode({'size': '300x300', 'data': mock_pay_url})}"
+    return {
+        "partnerCode": settings.MOMO_PARTNER_CODE,
+        "orderId": order_id,
+        "requestId": req_id,
+        "amount": amount,
+        "responseTime": int(time.time() * 1000),
+        "message": f"Thành công ({reason})",
+        "resultCode": 0,
+        "payUrl": mock_pay_url,
+        "deeplink": f"momo://app?action=pay&orderId={order_id}",
+        "qrCodeUrl": mock_qr_url,
+        "isMock": True,
+    }
+
+
+async def _post_momo_json(target_url: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+    """Gửi JSON tới MoMo hoặc Reverse Proxy và chuẩn hóa lỗi mạng/tường lửa về resultCode=99."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            resp = await client.post(target_url, json=payload)
+        except Exception as e:
+            logger.warning("Không gọi được MoMo tại %s: %r", target_url, e)
+            return {
+                "resultCode": 99,
+                "message": f"Không thể kết nối tới MoMo API: {e!r}",
+                "payUrl": None,
+            }
+
+    if resp.status_code >= 500 or resp.status_code in (403, 530):
+        try:
+            data = resp.json()
+            if isinstance(data, dict) and "resultCode" in data:
+                return data
+        except ValueError:
+            pass
+        body = " ".join(resp.text.split())[:200]
+        logger.warning("MoMo/Proxy trả về lỗi HTTP %s tại %s: %s", resp.status_code, target_url, body)
+        return {
+            "resultCode": 99,
+            "message": f"MoMo trả về HTTP {resp.status_code}, không phải JSON: {body[:100]}",
+            "payUrl": None,
+        }
+
+    try:
+        return resp.json()
+    except ValueError:
+        # Tường lửa hoặc proxy thường trả HTML; ghi lại để biết chính xác bên nào chặn
+        body = " ".join(resp.text.split())[:200]
+        logger.warning("MoMo trả về nội dung không phải JSON: url=%s status=%s body=%s", target_url, resp.status_code, body)
+        return {
+            "resultCode": 99,
+            "message": f"MoMo trả về HTTP {resp.status_code}, không phải JSON: {body[:100]}",
+            "payUrl": None,
+        }
+
+
+async def forward_to_momo_gateway(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Chuyển tiếp yêu cầu tạo giao dịch từ Reverse Proxy (máy Mac tại VN) tới thẳng MoMo Gateway."""
+    return await _post_momo_json(settings.MOMO_ENDPOINT, request_payload, timeout=10.0)
+
+
 async def create_momo_payment(order_id: str, amount: int, order_info: str) -> Dict[str, Any]:
-    """Tạo yêu cầu thanh toán sang MoMo (Hỗ trợ cả môi trường thử thật và chế độ MOMO_MOCK)."""
+    """Tạo yêu cầu thanh toán sang MoMo (Hỗ trợ cả môi trường thử thật, Reverse Proxy và chế độ MOMO_MOCK)."""
     request_id = str(uuid.uuid4())
     partner_code = settings.MOMO_PARTNER_CODE
     access_key = settings.MOMO_ACCESS_KEY
@@ -130,47 +225,13 @@ async def create_momo_payment(order_id: str, amount: int, order_info: str) -> Di
 
     # Chế độ MOMO_MOCK=True để demo khi chưa có khóa thử thực tế (Mục 7)
     if settings.MOMO_MOCK:
-        # Chuyển sang trang thanh toán giả lập trên frontend; khách bấm xác nhận hoặc hủy ở đó
-        # rồi mới về redirect_url, giống luồng cổng MoMo thật
-        query = urlencode({"orderId": order_id, "amount": amount, "requestId": request_id, "orderInfo": order_info})
-        mock_pay_url = f"{settings.FRONTEND_URL.rstrip('/')}/payments/momo?{query}"
-        mock_qr_url = f"https://api.qrserver.com/v1/create-qr-code/?{urlencode({'size': '300x300', 'data': mock_pay_url})}"
-        return {
-            "partnerCode": partner_code,
-            "orderId": order_id,
-            "requestId": request_id,
-            "amount": amount,
-            "responseTime": int(time.time() * 1000),
-            "message": "Thành công (MOMO_MOCK=True)",
-            "resultCode": 0,
-            "payUrl": mock_pay_url,
-            "deeplink": f"momo://app?action=pay&orderId={order_id}",
-            "qrCodeUrl": mock_qr_url,
-        }
+        return build_mock_momo_payment(order_id, amount, order_info, request_id=request_id)
 
-    # Gửi yêu cầu thực tế tới MoMo Gateway API
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(settings.MOMO_ENDPOINT, json=request_payload)
-        except Exception as e:
-            logger.warning("Không gọi được MoMo tại %s: %r", settings.MOMO_ENDPOINT, e)
-            return {
-                "resultCode": 99,
-                "message": f"Không thể kết nối tới MoMo API: {e!r}",
-                "payUrl": None,
-            }
-
-    try:
-        return resp.json()
-    except ValueError:
-        # Tường lửa hoặc proxy thường trả HTML; ghi lại để biết chính xác bên nào chặn
-        body = " ".join(resp.text.split())[:200]
-        logger.warning("MoMo trả về nội dung không phải JSON: url=%s status=%s body=%s", settings.MOMO_ENDPOINT, resp.status_code, body)
-        return {
-            "resultCode": 99,
-            "message": f"MoMo trả về HTTP {resp.status_code}, không phải JSON: {body[:100]}",
-            "payUrl": None,
-        }
+    # Ưu tiên gọi qua Reverse Proxy (Cloudflare Tunnel trên máy Mac tại VN) nếu có cấu hình MOMO_PROXY_URL
+    proxy_url = settings.MOMO_PROXY_URL.strip()
+    target_url = proxy_url or settings.MOMO_ENDPOINT
+    timeout = settings.MOMO_PROXY_TIMEOUT if proxy_url else 10.0
+    return await _post_momo_json(target_url, request_payload, timeout=timeout)
 
 
 def generate_mock_ipn_payload(

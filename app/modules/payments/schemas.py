@@ -16,6 +16,22 @@ class PaymentCreateResponse(BaseModel):
     message: str
 
 
+class MoMoCreateProxyPayload(BaseModel):
+    partnerCode: str
+    partnerName: Optional[str] = "Website Võ Phục Đai Trắng"
+    storeId: Optional[str] = "DaiTrangStore"
+    requestId: str
+    amount: int
+    orderId: str
+    orderInfo: str
+    redirectUrl: str
+    ipnUrl: str
+    lang: Optional[str] = "vi"
+    extraData: Optional[str] = ""
+    requestType: Optional[str] = "captureWallet"
+    signature: str
+
+
 class MoMoIPNPayload(BaseModel):
     partnerCode: str
     orderId: str

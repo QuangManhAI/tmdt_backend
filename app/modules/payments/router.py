@@ -8,12 +8,16 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user_token, require_role
 from app.core.responses import APIResponse
 from app.modules.payments.momo import (
+    build_mock_momo_payment,
     create_momo_payment,
+    forward_to_momo_gateway,
     generate_mock_ipn_payload,
+    verify_create_signature,
     verify_ipn_signature,
 )
 from app.modules.payments.schemas import (
     MockCallbackRequest,
+    MoMoCreateProxyPayload,
     MoMoIPNPayload,
     PaymentCreateRequest,
     PaymentCreateResponse,
@@ -22,6 +26,20 @@ from app.modules.payments.schemas import (
 )
 
 router = APIRouter(prefix="/payments/momo", tags=["MoMo Payment & IPN (F08, F19, Mục 7)"])
+
+
+@router.post("/proxy")
+async def momo_create_proxy(payload: MoMoCreateProxyPayload):
+    """Reverse Proxy tạo giao dịch MoMo (chạy trên máy Mac tại VN qua Cloudflare Tunnel).
+    Xác minh chữ ký HMAC-SHA256 bằng MOMO_SECRET_KEY trước khi chuyển tiếp tới MoMo Gateway.
+    """
+    payload_dict = payload.model_dump()
+    if not verify_create_signature(payload_dict):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chữ ký số yêu cầu tạo giao dịch MoMo không hợp lệ.",
+        )
+    return await forward_to_momo_gateway(payload_dict)
 
 
 @router.post("/create", response_model=APIResponse[PaymentCreateResponse])
@@ -46,7 +64,8 @@ async def create_payment(
     order_info = f"Thanh toan don hang {order.get('order_code')}"
 
     # MoMo từ chối orderId trùng (mã 41), nên thanh toán lại thì dùng lại link đã tạo cho đơn này
-    if not settings.MOMO_MOCK and order.get("momo_pay_url"):
+    # (Nếu lần trước chỉ là link giả lập dự phòng do máy Mac tắt thì thử tạo lại link thật)
+    if not settings.MOMO_MOCK and order.get("momo_pay_url") and not order.get("momo_is_mock"):
         return APIResponse(
             success=True,
             message="Dùng lại link thanh toán MoMo của đơn hàng",
@@ -60,12 +79,27 @@ async def create_payment(
             ),
         )
 
-    # Gọi hàm tích hợp MoMo
+    # Gọi hàm tích hợp MoMo (hoặc qua Reverse Proxy nếu cấu hình MOMO_PROXY_URL)
     momo_resp = await create_momo_payment(
         order_id=order.get("order_code"),
         amount=amount,
         order_info=order_info,
     )
+
+    # Tự động Fallback sang cổng MoMo giả lập nếu Proxy/MoMo không kết nối được (mã 99: timeout/530/403)
+    if (
+        not settings.MOMO_MOCK
+        and settings.MOMO_FALLBACK_MOCK
+        and momo_resp.get("resultCode") == 99
+        and not momo_resp.get("payUrl")
+    ):
+        momo_resp = build_mock_momo_payment(
+            order_id=order.get("order_code"),
+            amount=amount,
+            order_info=order_info,
+            request_id=momo_resp.get("requestId"),
+            reason="Dự phòng tự động khi Proxy/MoMo không phản hồi",
+        )
 
     # Chỉ payUrl mới mở được trên trình duyệt; qrCodeUrl là chuỗi momo:// dùng để vẽ QR
     pay_url = momo_resp.get("payUrl")
@@ -75,6 +109,7 @@ async def create_payment(
             detail=f"MoMo chưa tạo được link thanh toán (mã {momo_resp.get('resultCode')}): {momo_resp.get('message')}",
         )
 
+    is_mock = bool(settings.MOMO_MOCK or momo_resp.get("isMock"))
     if not settings.MOMO_MOCK:
         await orders_col.update_one(
             {"order_code": order.get("order_code")},
@@ -82,6 +117,7 @@ async def create_payment(
                 "momo_pay_url": pay_url,
                 "momo_qr_code_url": momo_resp.get("qrCodeUrl"),
                 "momo_request_id": momo_resp.get("requestId"),
+                "momo_is_mock": is_mock,
             }},
         )
 
@@ -243,14 +279,14 @@ async def mock_momo_callback(
     payload: MockCallbackRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Mục 7: Giả lập gọi IPN MoMo khi MOMO_MOCK=True phục vụ demo và kiểm thử tự động."""
-    if not settings.MOMO_MOCK:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Chỉ dùng được khi bật chế độ MOMO_MOCK",
-        )
+    """Mục 7: Giả lập gọi IPN MoMo khi MOMO_MOCK=True hoặc khi đơn hàng dùng chế độ Fallback Mock."""
     orders_col = db["orders"]
     order = await orders_col.find_one({"order_code": payload.order_code})
+    if not settings.MOMO_MOCK and not (order and order.get("momo_is_mock")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ dùng được khi bật chế độ MOMO_MOCK hoặc đơn dự phòng",
+        )
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
 

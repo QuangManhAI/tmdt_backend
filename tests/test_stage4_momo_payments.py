@@ -362,3 +362,98 @@ async def test_momo_non_json_response_reports_http_status(monkeypatch):
     assert res["payUrl"] is None
     assert "HTTP 403" in res["message"]
     assert "403 Forbidden" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_momo_reverse_proxy_verifies_signature_and_forwards(client: AsyncClient, monkeypatch):
+    """Reverse Proxy /payments/momo/proxy chỉ chuyển tiếp khi chữ ký HMAC-SHA256 hợp lệ."""
+    from app.modules.payments.momo import build_create_signature
+
+    monkeypatch.setattr(settings, "MOMO_PARTNER_CODE", "MOMO")
+    monkeypatch.setattr(settings, "MOMO_ACCESS_KEY", "F8BBA842ECF85")
+    monkeypatch.setattr(settings, "MOMO_SECRET_KEY", "K951B6PE1waDMi640xX08PD3vg6EkVlz")
+
+    payload = {
+        "partnerCode": "MOMO",
+        "partnerName": "Website Võ Phục Đai Trắng",
+        "storeId": "DaiTrangStore",
+        "requestId": "req-proxy-1",
+        "amount": 240000,
+        "orderId": "DT-20261107-PROXY1",
+        "orderInfo": "Thanh toan don hang DT-20261107-PROXY1",
+        "redirectUrl": "https://tmdt-frontend-seven.vercel.app/orders/payment-result",
+        "ipnUrl": "https://railway.example/api/v1/payments/momo/ipn",
+        "lang": "vi",
+        "extraData": "",
+        "requestType": "captureWallet",
+        "signature": "bad-sig",
+    }
+
+    # Chữ ký sai -> bị từ chối 403
+    res_bad = await client.post("/api/v1/payments/momo/proxy", json=payload)
+    assert res_bad.status_code == 403
+
+    # Chữ ký đúng -> chuyển tiếp sang MoMo Gateway
+    payload["signature"] = build_create_signature(
+        access_key=settings.MOMO_ACCESS_KEY,
+        amount=payload["amount"],
+        extra_data=payload["extraData"],
+        ipn_url=payload["ipnUrl"],
+        order_id=payload["orderId"],
+        order_info=payload["orderInfo"],
+        partner_code=payload["partnerCode"],
+        redirect_url=payload["redirectUrl"],
+        request_id=payload["requestId"],
+        request_type=payload["requestType"],
+        secret_key=settings.MOMO_SECRET_KEY,
+    )
+
+    async def fake_forward(req_payload):
+        return {
+            "resultCode": 0,
+            "message": "Thành công.",
+            "requestId": req_payload["requestId"],
+            "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?t=proxied",
+        }
+
+    monkeypatch.setattr(sys.modules["app.modules.payments.router"], "forward_to_momo_gateway", fake_forward)
+    res_ok = await client.post("/api/v1/payments/momo/proxy", json=payload)
+    assert res_ok.status_code == 200
+    assert res_ok.json()["payUrl"] == "https://test-payment.momo.vn/v2/gateway/pay?t=proxied"
+
+
+@pytest.mark.asyncio
+async def test_momo_fallback_to_mock_when_proxy_offline(client: AsyncClient, customer_headers, mock_mongo_db, monkeypatch):
+    """Khi MOMO_MOCK=False nhưng máy Mac tắt (Proxy trả resultCode=99), tự động chuyển sang cổng giả lập và cho phép mock-callback."""
+    async def fake_create_offline(order_id, amount, order_info):
+        return {
+            "resultCode": 99,
+            "message": "MoMo trả về HTTP 530, không phải JSON: Error 1033 Cloudflare Tunnel error",
+            "payUrl": None,
+        }
+
+    monkeypatch.setattr(settings, "MOMO_MOCK", False)
+    monkeypatch.setattr(settings, "MOMO_FALLBACK_MOCK", True)
+    monkeypatch.setattr(settings, "MOMO_PARTNER_CODE", "MOMO")
+    monkeypatch.setattr(settings, "MOMO_ACCESS_KEY", "F8BBA842ECF85")
+    monkeypatch.setattr(settings, "MOMO_SECRET_KEY", "K951B6PE1waDMi640xX08PD3vg6EkVlz")
+    monkeypatch.setattr(sys.modules["app.modules.payments.router"], "create_momo_payment", fake_create_offline)
+    await _insert_momo_order(mock_mongo_db, "DT-20261107-FALLBACK1")
+
+    res = await client.post(
+        "/api/v1/payments/momo/create",
+        headers=customer_headers,
+        json={"order_code": "DT-20261107-FALLBACK1"},
+    )
+    assert res.status_code == 200
+    pay_url = res.json()["data"]["pay_url"]
+    assert "/payments/momo?" in pay_url
+
+    # Đơn hàng được đánh dấu momo_is_mock=True nên gọi mock-callback được dù MOMO_MOCK=False
+    cb_res = await client.post(
+        "/api/v1/payments/momo/mock-callback",
+        json={"order_code": "DT-20261107-FALLBACK1", "result_code": 0},
+    )
+    assert cb_res.status_code == 200
+    updated_order = await mock_mongo_db["orders"].find_one({"order_code": "DT-20261107-FALLBACK1"})
+    assert updated_order["status"] == "paid"
