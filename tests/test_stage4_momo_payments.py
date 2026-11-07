@@ -264,3 +264,26 @@ async def test_f19_payment_transactions_and_manual_refund(client: AsyncClient, a
     # Kiểm tra trong DB: Trạng thái là refunded
     pay_doc = await mock_mongo_db["payments"].find_one({"id": "pay-sample-01"})
     assert pay_doc["status"] == "refunded"
+
+
+def test_momo_keys_required_from_env():
+    """Khóa MoMo không có giá trị mặc định trong mã nguồn, phải đọc từ biến môi trường."""
+    from app.core.config import Settings
+
+    keys = {"MOMO_PARTNER_CODE", "MOMO_ACCESS_KEY", "MOMO_SECRET_KEY"}
+    assert all(Settings.model_fields[name].default == "" for name in keys)
+    assert set(Settings(_env_file=None, MOMO_PARTNER_CODE="", MOMO_ACCESS_KEY="", MOMO_SECRET_KEY="").missing_momo_keys()) == keys
+    assert Settings(_env_file=None, MOMO_PARTNER_CODE="p", MOMO_ACCESS_KEY="a", MOMO_SECRET_KEY="s").missing_momo_keys() == []
+
+
+@pytest.mark.asyncio
+async def test_startup_refuses_real_momo_without_keys(monkeypatch):
+    """MOMO_MOCK=False mà thiếu khóa thì server từ chối khởi động."""
+    from app.main import app, lifespan
+
+    monkeypatch.setattr(settings, "DEBUG", True)
+    monkeypatch.setattr(settings, "MOMO_MOCK", False)
+    monkeypatch.setattr(settings, "MOMO_SECRET_KEY", "")
+    with pytest.raises(RuntimeError, match="MOMO_SECRET_KEY"):
+        async with lifespan(app):
+            pass
