@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -50,6 +50,12 @@ class ProductUpdate(BaseModel):
     is_customizable: Optional[bool] = None
     is_active: Optional[bool] = None
     variants: Optional[List[ProductVariantItem]] = None
+
+
+class ProductPriceUpdate(BaseModel):
+    """Chỉ đổi giá, không đụng tồn kho (tránh ghi đè số tồn vừa bị trừ bởi đơn mới)."""
+    prices: Dict[str, int] = Field(..., min_length=1, description="SKU -> giá mới (VND)")
+    original_price: Optional[int] = Field(None, ge=0, description="Giá gốc để hiện giảm giá; 0 = bỏ giá gốc")
 
 
 class ProductVariantResponse(ProductVariantItem):

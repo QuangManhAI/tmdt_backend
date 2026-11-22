@@ -12,6 +12,7 @@ from app.core.responses import APIResponse
 from app.modules.products.schemas import (
     ProductCreate,
     ProductListResponse,
+    ProductPriceUpdate,
     ProductResponse,
     ProductUpdate,
     ProductVariantResponse,
@@ -328,6 +329,25 @@ async def update_product(
             },
         )
 
+    if payload.variants is not None:
+        old_prices = {v.get("sku"): int(v.get("price", 0)) for v in existing.get("variants", [])}
+        price_changes = [
+            {"sku": v.sku, "size": v.size, "old_price": old_prices.get(v.sku), "new_price": v.price}
+            for v in payload.variants
+            if old_prices.get(v.sku) != v.price
+        ]
+        if price_changes:
+            from app.core.activity import record_activity
+            await record_activity(
+                db=db,
+                actor=current_user.get("phone", current_user.get("sub", "staff")),
+                actor_role=current_user.get("role", "staff"),
+                action="UPDATE_VARIANT_PRICE",
+                target_type="product",
+                target_id=product_id,
+                details={"product_name": existing.get("name"), "changes": price_changes},
+            )
+
     await products_col.update_one({"id": product_id}, {"$set": update_data})
     updated_doc = await products_col.find_one({"id": product_id})
 
@@ -336,6 +356,71 @@ async def update_product(
         message="Cập nhật sản phẩm thành công",
         data=_format_product(updated_doc),
     )
+
+
+@router.patch("/{product_id}/prices", response_model=APIResponse[ProductResponse])
+async def update_product_prices(
+    product_id: str,
+    payload: ProductPriceUpdate,
+    current_user: dict = Depends(require_role(["admin", "staff"])),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Đổi giá từng size (SKU). Giá hiển thị của sản phẩm = giá size rẻ nhất. Có ghi nhật ký."""
+    products_col = db["products"]
+    existing = await products_col.find_one({"id": product_id})
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy sản phẩm")
+
+    variants = existing.get("variants", [])
+    known = {v.get("sku"): v for v in variants}
+    unknown = [sku for sku in payload.prices if sku not in known]
+    if unknown:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"SKU không thuộc sản phẩm: {', '.join(unknown)}")
+    if any(p < 1000 for p in payload.prices.values()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Giá phải từ 1.000₫ trở lên")
+
+    new_prices = [payload.prices.get(v.get("sku"), int(v.get("price", 0))) for v in variants]
+    min_price = min(new_prices) if new_prices else int(existing.get("price", 0))
+    if payload.original_price and payload.original_price <= min_price:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Giá gốc phải cao hơn giá bán")
+
+    changes = [
+        {"sku": sku, "size": known[sku].get("size"), "old_price": int(known[sku].get("price", 0)), "new_price": price}
+        for sku, price in payload.prices.items()
+        if int(known[sku].get("price", 0)) != price
+    ]
+    now = datetime.now(timezone.utc)
+    # Cập nhật từng phần tử theo SKU, không ghi lại cả mảng variants nên tồn kho giữ nguyên
+    for c in changes:
+        await products_col.update_one(
+            {"id": product_id, "variants.sku": c["sku"]},
+            {"$set": {"variants.$.price": c["new_price"], "updated_at": now}},
+        )
+    top_set: dict = {"price": min_price, "updated_at": now}
+    if payload.original_price is not None:
+        original = payload.original_price or None
+        top_set["original_price"] = original
+        top_set["discount_percent"] = round((original - min_price) / original * 100) if original else 0
+    elif existing.get("original_price") and existing["original_price"] <= min_price:
+        top_set.update({"original_price": None, "discount_percent": 0})  # giá mới đã cao hơn giá gốc cũ
+    elif existing.get("original_price"):
+        top_set["discount_percent"] = round((existing["original_price"] - min_price) / existing["original_price"] * 100)
+    await products_col.update_one({"id": product_id}, {"$set": top_set})
+
+    if changes or payload.original_price is not None:
+        from app.core.activity import record_activity
+        await record_activity(
+            db=db,
+            actor=current_user.get("phone", current_user.get("sub", "staff")),
+            actor_role=current_user.get("role", "staff"),
+            action="UPDATE_VARIANT_PRICE",
+            target_type="product",
+            target_id=product_id,
+            details={"product_name": existing.get("name"), "changes": changes, "original_price": top_set.get("original_price")},
+        )
+
+    updated = await products_col.find_one({"id": product_id})
+    return APIResponse(success=True, message="Đã cập nhật giá", data=_format_product(updated))
 
 
 @router.delete("/{product_id}", response_model=APIResponse[dict])

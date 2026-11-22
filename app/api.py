@@ -13,6 +13,7 @@ from app.modules.promotions.router import router as promotions_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.seo.router import router as seo_router
 from app.modules.size_advisor.router import router as size_advisor_router
+from app.modules.store_settings.router import router as store_settings_router
 
 api_router = APIRouter()
 
@@ -31,3 +32,4 @@ api_router.include_router(blog_router)
 api_router.include_router(admin_router)
 api_router.include_router(analytics_router)
 api_router.include_router(seo_router)
+api_router.include_router(store_settings_router)
