@@ -18,11 +18,13 @@ class Settings(BaseSettings):
 
     # CORS
     BACKEND_CORS_ORIGINS: Union[List[str], str] = [
+        "https://www.cuahangvophuc.store",
+        "https://cuahangvophuc.store",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
-    BACKEND_CORS_ORIGIN_REGEX: str = r"https://.*\.vercel\.app"
+    BACKEND_CORS_ORIGIN_REGEX: str = r"https://(.*\.vercel\.app|(www\.)?cuahangvophuc\.store)"
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
