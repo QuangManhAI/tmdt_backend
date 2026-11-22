@@ -2,16 +2,17 @@
 
 Mọi đơn demo có cờ is_demo=True và mã bắt đầu bằng "DEMO-", gỡ sạch bằng --remove.
 Chạy từ thư mục tmdt_backend:
-    python -m scripts.seed_demo_orders                 # chỉ in thống kê, không ghi
-    python -m scripts.seed_demo_orders --apply         # ghi ~90 ngày đơn demo
-    python -m scripts.seed_demo_orders --remove        # xóa toàn bộ đơn demo
+    python -m scripts.seed_demo_orders                                  # chỉ in thống kê, không ghi
+    python -m scripts.seed_demo_orders --apply                          # thay đơn demo: 01/09/2026 -> hôm nay, ~45 đơn/ngày
+    python -m scripts.seed_demo_orders --apply --start 2026-06-01 --per-day 80
+    python -m scripts.seed_demo_orders --remove                         # xóa toàn bộ đơn demo
 """
 
 import argparse
 import asyncio
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -35,16 +36,24 @@ def _pick(rng: random.Random, pairs):
     return rng.choices(values, weights=weights)[0]
 
 
-def build_orders(products: list[dict], days: int = 90, seed: int = 42) -> list[dict]:
+def build_orders(products: list[dict], days: int = 90, seed: int = 42, start: date | None = None, per_day: float = 7) -> list[dict]:
     rng = random.Random(seed)
     today = datetime.now(VN_TZ).date()
+    if start is not None:
+        days = max(0, (today - start).days)
     weights = [CATEGORY_WEIGHT.get(p.get("category_id"), 1) for p in products]
+    # Tập khách cố định để có khách mua lại nhiều lần (khoảng 40% đơn là khách cũ)
+    customers = [f"09{rng.randint(10_000_000, 99_999_999)}" for _ in range(max(50, int(per_day * days * 0.6)))]
     orders = []
     for back in range(days, -1, -1):
         day = today - timedelta(days=back)
-        # Cuối tuần và mùa tựu trường (tháng 8-9) bán nhiều hơn; xu hướng tăng dần về hiện tại
-        base = 4 + (3 if day.weekday() >= 5 else 0) + (3 if day.month in (8, 9) else 0) + (days - back) / days * 3
-        for _ in range(max(0, int(rng.gauss(base, 2)))):
+        progress = (days - back) / days if days else 1
+        # Cuối tuần, mùa tựu trường (tháng 9) và trước Tết dương (tháng 12) bán nhiều hơn; xu hướng tăng dần
+        factor = 1.0 + (0.45 if day.weekday() >= 5 else 0) + (0.35 if day.month == 9 and day.day <= 15 else 0) + progress * 0.4
+        if day.month == 11 and day.day in (11, 20):  # ngày 11/11 và 20/11 chạy khuyến mãi
+            factor += 0.9
+        mean = per_day * factor / 1.5
+        for _ in range(max(0, int(rng.gauss(mean, mean * 0.22)))):
             hour = rng.choices(range(24), weights=HOUR_WEIGHTS)[0]
             local = datetime(day.year, day.month, day.day, hour, rng.randint(0, 59), tzinfo=VN_TZ)
             items = []
@@ -77,7 +86,7 @@ def build_orders(products: list[dict], days: int = 90, seed: int = 42) -> list[d
             orders.append({
                 "id": f"ord-demo-{uuid.uuid4().hex[:10]}", "order_code": code, "is_demo": True,
                 "user_id": None, "channel": "club" if club else "retail",
-                "customer_name": "Khách demo", "customer_phone": f"09{rng.randint(10_000_000, 99_999_999)}",
+                "customer_name": "Khách demo", "customer_phone": rng.choice(customers[: max(50, int(len(customers) * (0.35 + 0.65 * progress)))]),
                 "shipping_address": {"recipient_name": "Khách demo", "street_address": "Demo", "city_province": _pick(rng, PROVINCES)},
                 "subtotal": subtotal, "shipping_fee": shipping, "discount_amount": 0, "voucher_code": None,
                 "embroidery_total": embroidery, "total_amount": subtotal + embroidery + shipping,
@@ -89,7 +98,7 @@ def build_orders(products: list[dict], days: int = 90, seed: int = 42) -> list[d
     return orders
 
 
-async def main(apply: bool, remove: bool) -> None:
+async def main(apply: bool, remove: bool, start: date, per_day: float) -> None:
     uri = settings.MONGODB_URI
     tls = {"tlsCAFile": certifi.where()} if uri.startswith("mongodb+srv://") else {}
     db = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=10000, **tls)[settings.MONGODB_DB_NAME]
@@ -102,18 +111,26 @@ async def main(apply: bool, remove: bool) -> None:
     if not products:
         print("Chưa có sản phẩm, chạy scripts.seed_catalog trước.")
         return
-    orders = build_orders(products)
-    print(f"Sẽ tạo {len(orders)} đơn demo trong 90 ngày, tổng {sum(o['total_amount'] for o in orders):,}₫")
+    orders = build_orders(products, start=start, per_day=per_day)
+    units = sum(it["quantity"] for o in orders for it in o["items"])
+    print(f"Sẽ tạo {len(orders):,} đơn demo từ {start:%d/%m/%Y} đến hôm nay: {units:,} sản phẩm, "
+          f"{len({o['customer_phone'] for o in orders}):,} khách, tổng {sum(o['total_amount'] for o in orders):,}₫")
     if not apply:
         print("Chưa ghi gì (thêm --apply để ghi thật, --remove để gỡ).")
         return
-    await db["orders"].insert_many(orders)
-    print("Đã ghi xong.")
+    removed = (await db["orders"].delete_many({"is_demo": True})).deleted_count
+    if removed:
+        print(f"Đã thay {removed:,} đơn demo cũ")
+    for i in range(0, len(orders), 1000):
+        await db["orders"].insert_many(orders[i:i + 1000])
+    print(f"Đã ghi {len(orders):,} đơn demo.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--remove", action="store_true")
+    parser.add_argument("--start", type=date.fromisoformat, default=date(2026, 9, 1), help="Ngày bắt đầu (YYYY-MM-DD)")
+    parser.add_argument("--per-day", type=float, default=45, help="Số đơn trung bình mỗi ngày")
     args = parser.parse_args()
-    asyncio.run(main(args.apply, args.remove))
+    asyncio.run(main(args.apply, args.remove, args.start, args.per_day))
