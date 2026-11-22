@@ -85,7 +85,14 @@ async def init_db():
     try:
         # 1. Collection 'users'
         users_col = database["users"]
-        await users_col.create_index("phone", unique=True)
+        # Tài khoản Google/Facebook có thể chưa có số điện thoại -> unique nhưng sparse.
+        # Index cũ (unique, không sparse) phải xóa trước, nếu không create_index báo xung đột tùy chọn.
+        phone_index = (await users_col.index_information()).get("phone_1")
+        if phone_index and not phone_index.get("sparse"):
+            await users_col.drop_index("phone_1")
+        await users_col.create_index("phone", unique=True, sparse=True)
+        await users_col.create_index("google_id", unique=True, sparse=True)
+        await users_col.create_index("facebook_id", unique=True, sparse=True)
         await users_col.create_index("email", unique=False, sparse=True)
         await users_col.create_index("role")
 

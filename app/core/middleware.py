@@ -92,7 +92,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Kiểm tra endpoint xác thực nhạy cảm
         is_sensitive_auth = any(
-            p in path for p in ["/auth/login", "/auth/register", "/auth/forgot-password", "/auth/reset-password"]
+            p in path for p in ["/auth/login", "/auth/register", "/auth/forgot-password", "/auth/reset-password", "/auth/oauth/"]
         )
 
         if is_sensitive_auth:

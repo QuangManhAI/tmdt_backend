@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 from app.modules.admin.router import router as admin_router
+from app.modules.analytics.router import router as analytics_router
 from app.modules.auth.router import router as auth_router
+from app.modules.auth.oauth import router as oauth_router
 from app.modules.blog.router import router as blog_router
 from app.modules.cart.router import router as cart_router
 from app.modules.dojos.router import router as dojos_router
@@ -22,8 +24,10 @@ api_router.include_router(cart_router)
 api_router.include_router(orders_router)
 api_router.include_router(payments_router)
 api_router.include_router(auth_router)
+api_router.include_router(oauth_router)
 api_router.include_router(promotions_router)
 api_router.include_router(reviews_router)
 api_router.include_router(blog_router)
 api_router.include_router(admin_router)
+api_router.include_router(analytics_router)
 api_router.include_router(seo_router)

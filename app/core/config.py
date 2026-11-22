@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     MAIL_FROM: str = "VÕ <noreply@localhost>"
 
+    # Đăng nhập mạng xã hội (OAuth 2.0). Để trống thì nút tương ứng báo "chưa cấu hình".
+    # Redirect URI cần khai báo trên Google Cloud / Meta for Developers:
+    #   {BACKEND_URL}/api/v1/auth/oauth/google/callback
+    #   {BACKEND_URL}/api/v1/auth/oauth/facebook/callback
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    FACEBOOK_APP_ID: str = ""
+    FACEBOOK_APP_SECRET: str = ""
+    FACEBOOK_GRAPH_VERSION: str = "v23.0"
+
     # Phí thêu tên võ sinh (F07), dùng chung cho giỏ hàng và đặt hàng
     EMBROIDERY_FEE: int = 30000
 

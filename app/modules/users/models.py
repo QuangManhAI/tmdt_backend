@@ -22,9 +22,13 @@ class StudentProfileDoc(BaseModel):
 class UserDoc(BaseModel):
     """Tài khoản người dùng lưu trong MongoDB (F01)."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    phone: str
+    # Tài khoản đăng nhập Google/Facebook có thể chưa có số điện thoại: khi lưu phải bỏ hẳn trường này
+    # (không ghi null) vì index unique+sparse chỉ bỏ qua document thiếu trường.
+    phone: Optional[str] = None
     full_name: str
     hashed_password: str
+    google_id: Optional[str] = None
+    facebook_id: Optional[str] = None
     role: str = "customer"  # customer, coach, staff, admin
     email: Optional[str] = None
     address: Optional[str] = None
@@ -39,7 +43,7 @@ class UserDoc(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    phone: str
+    phone: Optional[str] = None
     full_name: str
     role: str
     email: Optional[str] = None

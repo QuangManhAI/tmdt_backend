@@ -75,7 +75,7 @@ async def register(user_data: UserRegister, db: AsyncIOMotorDatabase = Depends(g
         updated_at=now,
     )
 
-    user_dict = new_user.model_dump()
+    user_dict = new_user.model_dump(exclude={"google_id", "facebook_id"})
     await users_col.insert_one(user_dict)
 
     # Tạo JWT Access Token
@@ -196,7 +196,7 @@ async def login(credentials: UserLogin, db: AsyncIOMotorDatabase = Depends(get_d
             "action": "ADMIN_LOGIN",
             "target_type": "auth",
             "target_id": user["id"],
-            "details": {"full_name": user["full_name"], "phone": user["phone"]},
+            "details": {"full_name": user["full_name"], "phone": user.get("phone")},
             "timestamp": now,
         })
 
@@ -344,7 +344,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     """Lấy thông tin tài khoản đang đăng nhập."""
     user_response = UserResponse(
         id=current_user["id"],
-        phone=current_user["phone"],
+        phone=current_user.get("phone"),
         full_name=current_user["full_name"],
         role=current_user.get("role", "customer"),
         email=current_user.get("email"),
