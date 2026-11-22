@@ -132,7 +132,9 @@ async def init_db():
 
         # 7. Voucher, đánh giá, bài viết
         await database["vouchers"].create_index("code")
-        await database["reviews"].create_index("product_id")
+        await database["reviews"].create_index([("product_id", 1), ("is_hidden", 1), ("created_at", -1)])
+        await database["reviews"].create_index([("user_id", 1), ("product_id", 1)])
+        await database["orders"].create_index([("user_id", 1), ("status", 1)])
         await database["blog_posts"].create_index("slug")
 
         # 8. Chat trực tuyến khách hàng <-> cửa hàng
