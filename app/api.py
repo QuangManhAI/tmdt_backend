@@ -14,6 +14,7 @@ from app.modules.products.router import router as products_router
 from app.modules.promotions.router import router as promotions_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.seo.router import router as seo_router
+from app.modules.shipping.router import router as shipping_router
 from app.modules.size_advisor.router import router as size_advisor_router
 from app.modules.store_settings.router import router as store_settings_router
 
@@ -25,6 +26,7 @@ api_router.include_router(size_advisor_router)
 api_router.include_router(dojos_router)
 api_router.include_router(cart_router)
 api_router.include_router(orders_router)
+api_router.include_router(shipping_router)
 api_router.include_router(payments_router)
 api_router.include_router(auth_router)
 api_router.include_router(account_router)

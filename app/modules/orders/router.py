@@ -14,7 +14,8 @@ from app.modules.orders.schemas import (
     OrderResponse,
     OrderStatusUpdateRequest,
 )
-from app.modules.shipping.provider import shipping_service
+from app.modules.shipping.provider import MockShippingProvider, ShippingError, shipping_service
+from app.modules.shipping.tracking import maybe_sync_shipment
 
 router = APIRouter(prefix="/orders", tags=["Orders, Inventory & Checkout (F08, F09, F17)"])
 
@@ -58,6 +59,23 @@ def _generate_order_code() -> str:
     return f"DT-{date_str}-{random_str}"
 
 
+def _format_shipment(doc: dict) -> Optional[dict]:
+    shipment = doc.get("shipment")
+    if not shipment:
+        return None
+    code = doc.get("tracking_code")
+    return {
+        "status": shipment.get("status"),
+        "status_label": shipment.get("status_label"),
+        "expected_delivery_time": shipment.get("expected_delivery_time"),
+        "tracking_url": shipping_service.tracking_url(code) if code and doc.get("carrier") == shipping_service.name else None,
+        "events": [
+            {"status": e.get("status"), "status_label": e.get("status_label"), "time": e.get("time")}
+            for e in (doc.get("shipment_events") or [])
+        ][-20:],
+    }
+
+
 def _format_order(doc: dict) -> OrderResponse:
     addr = doc.get("shipping_address", {})
     if isinstance(addr, dict):
@@ -86,6 +104,8 @@ def _format_order(doc: dict) -> OrderResponse:
         status=doc.get("status", "pending_payment"),
         items=doc.get("items", []),
         tracking_code=doc.get("tracking_code"),
+        carrier=doc.get("carrier"),
+        shipment=_format_shipment(doc),
         status_history=doc.get("status_history", []),
         created_at=doc.get("created_at", datetime.now(timezone.utc)),
     )
@@ -196,9 +216,9 @@ async def create_order(
 
     # 3. Tính phí vận chuyển qua ShippingProvider
     shipping_address_dict = payload.shipping_address.model_dump()
-    shipping_fee = shipping_service.quote(
+    shipping_fee = await shipping_service.quote(
         address=shipping_address_dict,
-        weight=0.5 * len(payload.items),
+        quantity=sum(item.quantity for item in payload.items),
         subtotal=subtotal,
     )
     total_amount = max(subtotal + embroidery_total + shipping_fee - discount_amount, 0)
@@ -254,8 +274,8 @@ async def create_order(
     initial_status = "confirmed" if payload.payment_method.upper() == "COD" else "pending_payment"
     payment_status = "unpaid"
 
-    # 5. Sinh mã vận đơn từ shipping provider
-    shipment_info = shipping_service.create_shipment({"shipping_fee": shipping_fee})
+    # 5. Vận chuyển giả lập cấp sẵn mã vận đơn; GHN chỉ tạo vận đơn khi admin chuyển đơn sang "Đang giao"
+    mock_tracking = shipping_service.mock_tracking_code() if isinstance(shipping_service, MockShippingProvider) else None
 
     initial_history = [
         {
@@ -286,7 +306,7 @@ async def create_order(
         "payment_status": payment_status,
         "status": initial_status,
         "items": [item.model_dump() for item in payload.items],
-        "tracking_code": shipment_info.get("tracking_code"),
+        "tracking_code": mock_tracking,
         "status_history": initial_history,
         "created_at": now,
         "updated_at": now,
@@ -356,16 +376,21 @@ async def list_orders(
 @router.get("/shipping-quote", response_model=APIResponse[dict])
 async def quote_shipping_fee(
     city_province: str = Query(..., min_length=2, description="Tỉnh / Thành phố nhận hàng"),
+    ward: str = Query("", max_length=100, description="Phường / Xã (GHN cần để tính đúng phí)"),
     subtotal: int = Query(0, ge=0, description="Tạm tính tiền hàng (VND)"),
+    quantity: int = Query(1, ge=1, le=100, description="Tổng số sản phẩm"),
 ):
     """Báo phí vận chuyển trước khi đặt hàng, cùng công thức với lúc tạo đơn (Mục 7)."""
-    fee = shipping_service.quote(address={"city_province": city_province}, subtotal=subtotal)
+    fee = await shipping_service.quote(
+        address={"city_province": city_province, "ward": ward}, quantity=quantity, subtotal=subtotal
+    )
     return APIResponse(
         success=True,
         message="Báo phí vận chuyển",
         data={
             "shipping_fee": fee,
             "freeship_threshold": shipping_service.freeship_threshold,
+            "carrier": shipping_service.name,
         },
     )
 
@@ -384,6 +409,7 @@ async def get_order_detail(
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn hàng")
 
     _check_order_access(doc, token_payload, phone)
+    doc = await maybe_sync_shipment(db, doc)
 
     return APIResponse(
         success=True,
@@ -439,6 +465,19 @@ async def update_order_status(
                 "created_at": now,
             })
 
+    # Giao cho đơn vị vận chuyển: tạo vận đơn trước, GHN từ chối thì giữ nguyên trạng thái để admin sửa địa chỉ
+    shipping_set: dict = {}
+    if new_status == "shipping" and not order.get("shipment"):
+        try:
+            created = await shipping_service.create_shipment(order)
+        except ShippingError as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        shipping_set = {
+            "tracking_code": created["tracking_code"],
+            "carrier": created["carrier"],
+            "shipment": {**created["shipment"], "created_at": now, "synced_at": now},
+        }
+
     history_entry = {
         "old_status": curr_status,
         "new_status": new_status,
@@ -446,11 +485,13 @@ async def update_order_status(
         "timestamp": now,
         "note": payload.note or f"Chuyển trạng thái sang {new_status}",
     }
+    if shipping_set:
+        history_entry["note"] += f" ({shipping_set['carrier']} {shipping_set['tracking_code']})"
 
     await orders_col.update_one(
         {"order_code": order_code},
         {
-            "$set": {"status": new_status, "updated_at": now},
+            "$set": {"status": new_status, "updated_at": now, **shipping_set},
             "$push": {"status_history": history_entry},
         },
     )

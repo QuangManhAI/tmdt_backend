@@ -1,3 +1,5 @@
+import importlib
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -14,6 +16,20 @@ def disable_real_email(monkeypatch):
     """Không bao giờ gửi email thật khi chạy test, kể cả khi .env có RESEND_API_KEY."""
     from app.core.config import settings
     monkeypatch.setattr(settings, "RESEND_API_KEY", "")
+
+
+SHIPPING_MODULES = ("app.modules.orders.router", "app.modules.shipping.router", "app.modules.shipping.tracking")
+
+
+@pytest.fixture(autouse=True)
+def mock_shipping(monkeypatch):
+    """Luôn dùng vận chuyển giả lập khi test, kể cả khi .env có GHN_TOKEN (không gọi GHN thật)."""
+    from app.modules.shipping.provider import MockShippingProvider
+            
+    mock = MockShippingProvider()
+    for module in (importlib.import_module(m) for m in SHIPPING_MODULES):
+        monkeypatch.setattr(module, "shipping_service", mock)
+    return mock
 
 
 @pytest.fixture(autouse=True)

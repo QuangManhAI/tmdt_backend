@@ -66,6 +66,8 @@ class OrderResponse(BaseModel):
     status: str  # pending_payment, confirmed, processing, shipping, delivered, completed, cancelled
     items: List[OrderItemCreate]
     tracking_code: Optional[str] = None
+    carrier: Optional[str] = None  # MockShipping hoặc GHN
+    shipment: Optional[dict] = None  # {status, status_label, expected_delivery_time, tracking_url, events}
     status_history: List[OrderStatusHistoryItem] = []
     created_at: datetime
 

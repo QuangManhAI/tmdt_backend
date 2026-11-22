@@ -489,7 +489,7 @@ async def get_packing_slip(
         customer_phone=order.get("customer_phone", ""),
         shipping_address=addr_str,
         tracking_code=tracking,
-        carrier="MockShipping",
+        carrier=order.get("carrier") or "MockShipping",
         items=items,
         total_quantity=total_qty,
         notes="; ".join(notes) if notes else None,

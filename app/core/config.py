@@ -69,6 +69,25 @@ class Settings(BaseSettings):
     MOMO_REDIRECT_URL: str = "http://localhost:3000/orders/payment-result"
     MOMO_IPN_URL: str = "http://localhost:8000/api/v1/payments/momo/ipn"
 
+    # Giao Hàng Nhanh (GHN). Có GHN_TOKEN + GHN_SHOP_ID thì dùng GHN, để trống thì dùng vận chuyển giả lập.
+    # Môi trường test: https://dev-online-gateway.ghn.vn/shiip/public-api (tài khoản tại 5sao.ghn.dev)
+    # Production:      https://online-gateway.ghn.vn/shiip/public-api
+    # Webhook trạng thái đơn khai báo trên GHN: {BACKEND_URL}/api/v1/shipping/ghn/webhook
+    GHN_TOKEN: str = ""
+    GHN_SHOP_ID: str = ""
+    GHN_BASE_URL: str = "https://dev-online-gateway.ghn.vn/shiip/public-api"
+    # Địa chỉ lấy hàng (theo địa giới mới: phường + tỉnh). Bỏ trống GHN_FROM_ADDRESS thì GHN dùng địa chỉ hồ sơ cửa hàng.
+    GHN_FROM_NAME: str = "VÕ SPORT"
+    GHN_FROM_PHONE: str = ""
+    GHN_FROM_ADDRESS: str = "123 Võ Văn Tần"
+    GHN_FROM_WARD: str = "Phường Xuân Hòa"
+    GHN_FROM_PROVINCE: str = "Hồ Chí Minh"
+    # KHONGCHOXEMHANG | CHOXEMHANGKHONGTHU | CHOTHUHANG
+    GHN_REQUIRED_NOTE: str = "CHOXEMHANGKHONGTHU"
+    # Trang tra cứu hành trình cho khách. Môi trường test không có trang công khai nên để trống.
+    # Production: https://donhang.ghn.vn/?order_code=
+    GHN_TRACKING_URL: str = ""
+
     # Email giao dịch qua Resend (xác nhận đơn, quên mật khẩu). Để trống thì bỏ qua gửi mail.
     RESEND_API_KEY: str = ""
     MAIL_FROM: str = "VÕ <noreply@localhost>"
