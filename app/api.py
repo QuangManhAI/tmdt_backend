@@ -5,6 +5,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.auth.oauth import router as oauth_router
 from app.modules.blog.router import router as blog_router
 from app.modules.cart.router import router as cart_router
+from app.modules.chat.router import router as chat_router
 from app.modules.dojos.router import router as dojos_router
 from app.modules.orders.router import router as orders_router
 from app.modules.payments.router import router as payments_router
@@ -30,6 +31,7 @@ api_router.include_router(promotions_router)
 api_router.include_router(reviews_router)
 api_router.include_router(blog_router)
 api_router.include_router(admin_router)
+api_router.include_router(chat_router)
 api_router.include_router(analytics_router)
 api_router.include_router(seo_router)
 api_router.include_router(store_settings_router)

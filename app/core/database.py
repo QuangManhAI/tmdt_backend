@@ -135,6 +135,15 @@ async def init_db():
         await database["reviews"].create_index("product_id")
         await database["blog_posts"].create_index("slug")
 
+        # 8. Chat trực tuyến khách hàng <-> cửa hàng
+        conversations_col = database["conversations"]
+        await conversations_col.create_index("id", unique=True)
+        await conversations_col.create_index("user_id", unique=True, sparse=True)
+        await conversations_col.create_index("guest_token_hash", unique=True, sparse=True)
+        await conversations_col.create_index([("status", 1), ("last_message_at", -1)])
+        await conversations_col.create_index("last_message_at")
+        await database["chat_messages"].create_index([("conversation_id", 1), ("seq", 1)], unique=True)
+
         logger.info("Khởi tạo và đánh chỉ mục (indexes) MongoDB Atlas thành công.")
     except Exception as e:
         logger.warning(f"Lỗi khi khởi tạo indexes: {e}")
