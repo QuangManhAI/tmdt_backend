@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class ProductVariantItem(BaseModel):
     sku: str = Field(..., description="Mã biến thể duy nhất, ví dụ: VOV-STD-S1-TRANG")
-    size: str = Field(..., description="Kích thước: Size 00, Size 0, Size 1, Size 2... hoặc S, M, L, XL")
+    size: str = Field(..., description="Kích thước võ phục: Size 1 ... Size 8; phụ kiện dùng Freesize")
     color: str = Field(default="Trắng", description="Màu sắc")
     price: int = Field(..., ge=0, description="Giá bán theo VND (số nguyên)")
     stock: int = Field(default=10, ge=0, description="Số lượng tồn kho (>= 0)")
@@ -15,8 +15,8 @@ class ProductVariantItem(BaseModel):
 class ProductBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     slug: str = Field(..., min_length=2, max_length=200)
-    martial_art_id: str = Field(..., description="vovinam, taekwondo, karate, vo_co_truyen")
-    category_id: str = Field(..., description="vo_phuc, dai, bao_ho, tui_dung, phu_kien")
+    martial_art_id: str = Field(..., description="vovinam, taekwondo, karate, vo_co_truyen, chung (dùng chung mọi môn)")
+    category_id: str = Field(..., description="vo_phuc, dai, bao_ho, tui_dung (túi & balo), phu_kien (phụ kiện tập luyện)")
     belt_rank: Optional[str] = Field(None, description="lam_dai, hoang_dai, dai_den, dai_trang...")
     price: int = Field(..., ge=0, description="Giá niêm yết theo VND (số nguyên)")
     original_price: Optional[int] = Field(None, ge=0, description="Giá gốc trước giảm (VND)")

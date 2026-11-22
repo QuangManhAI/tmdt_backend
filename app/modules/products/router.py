@@ -83,7 +83,7 @@ def _format_product(doc: dict) -> ProductResponse:
 @router.get("", response_model=APIResponse[ProductListResponse])
 async def list_products(
     response: Response,
-    martial_art: Optional[str] = Query(None, description="Lọc theo môn: vovinam, taekwondo, karate, vo_co_truyen"),
+    martial_art: Optional[str] = Query(None, description="Lọc theo môn: vovinam, taekwondo, karate, vo_co_truyen, chung"),
     category: Optional[str] = Query(None, description="Lọc theo loại: vo_phuc, dai, bao_ho, tui_dung, phu_kien"),
     belt_rank: Optional[str] = Query(None, description="Lọc theo cấp đai: lam_dai, hoang_dai, dai_den..."),
     size: Optional[str] = Query(None, description="Lọc theo kích cỡ"),

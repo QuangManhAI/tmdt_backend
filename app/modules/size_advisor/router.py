@@ -37,15 +37,14 @@ async def recommend_size(
     # Nếu DB chưa có bảng size, dùng bảng mặc định
     if not charts:
         default_sizes = [
-            {"size_name": "Size 00", "height_min_cm": 100, "height_max_cm": 115, "weight_min_kg": 15, "weight_max_kg": 22},
-            {"size_name": "Size 0", "height_min_cm": 115, "height_max_cm": 125, "weight_min_kg": 20, "weight_max_kg": 28},
-            {"size_name": "Size 1", "height_min_cm": 125, "height_max_cm": 135, "weight_min_kg": 26, "weight_max_kg": 35},
-            {"size_name": "Size 2", "height_min_cm": 135, "height_max_cm": 145, "weight_min_kg": 33, "weight_max_kg": 42},
-            {"size_name": "Size 3", "height_min_cm": 145, "height_max_cm": 155, "weight_min_kg": 40, "weight_max_kg": 50},
-            {"size_name": "Size 4", "height_min_cm": 155, "height_max_cm": 165, "weight_min_kg": 48, "weight_max_kg": 60},
-            {"size_name": "Size 5", "height_min_cm": 165, "height_max_cm": 172, "weight_min_kg": 58, "weight_max_kg": 70},
-            {"size_name": "Size 6", "height_min_cm": 172, "height_max_cm": 180, "weight_min_kg": 68, "weight_max_kg": 82},
-            {"size_name": "Size 7", "height_min_cm": 180, "height_max_cm": 195, "weight_min_kg": 80, "weight_max_kg": 105},
+            {"size_name": "Size 1", "height_min_cm": 105, "height_max_cm": 120, "weight_min_kg": 16, "weight_max_kg": 24},
+            {"size_name": "Size 2", "height_min_cm": 120, "height_max_cm": 130, "weight_min_kg": 22, "weight_max_kg": 30},
+            {"size_name": "Size 3", "height_min_cm": 130, "height_max_cm": 140, "weight_min_kg": 28, "weight_max_kg": 36},
+            {"size_name": "Size 4", "height_min_cm": 140, "height_max_cm": 150, "weight_min_kg": 34, "weight_max_kg": 44},
+            {"size_name": "Size 5", "height_min_cm": 150, "height_max_cm": 160, "weight_min_kg": 42, "weight_max_kg": 52},
+            {"size_name": "Size 6", "height_min_cm": 160, "height_max_cm": 168, "weight_min_kg": 50, "weight_max_kg": 62},
+            {"size_name": "Size 7", "height_min_cm": 168, "height_max_cm": 176, "weight_min_kg": 60, "weight_max_kg": 74},
+            {"size_name": "Size 8", "height_min_cm": 176, "height_max_cm": 192, "weight_min_kg": 72, "weight_max_kg": 95},
         ]
         charts = default_sizes
 
